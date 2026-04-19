@@ -95,6 +95,31 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
+
+  /* Neon Aura palette */
+  --aura-bg: oklch(0.12 0.08 290);
+  --aura-bg-deep: oklch(0.06 0.06 285);
+  --aura-purple: oklch(0.55 0.25 295);
+  --aura-purple-glow: oklch(0.7 0.28 300);
+  --aura-gold: oklch(0.85 0.17 90);
+  --aura-gold-glow: oklch(0.92 0.18 95);
+  --aura-cyan: oklch(0.78 0.18 200);
+  --aura-magenta: oklch(0.7 0.28 340);
+
+  --gradient-aura: linear-gradient(135deg, oklch(0.55 0.25 295), oklch(0.85 0.17 90));
+  --gradient-bg: radial-gradient(ellipse at center, oklch(0.18 0.1 290), oklch(0.05 0.05 285));
+  --shadow-glow-purple: 0 0 40px oklch(0.7 0.28 300 / 0.5);
+  --shadow-glow-gold: 0 0 30px oklch(0.85 0.17 90 / 0.6);
+}
+
+@theme inline {
+  --color-aura-bg: var(--aura-bg);
+  --color-aura-purple: var(--aura-purple);
+  --color-aura-purple-glow: var(--aura-purple-glow);
+  --color-aura-gold: var(--aura-gold);
+  --color-aura-gold-glow: var(--aura-gold-glow);
+  --color-aura-cyan: var(--aura-cyan);
+  --color-aura-magenta: var(--aura-magenta);
 }
 
 .dark {
