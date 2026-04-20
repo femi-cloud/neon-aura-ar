@@ -4,15 +4,25 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Settings2 } from "lucide-react";
+import { Settings2, GraduationCap } from "lucide-react";
 import type { AuraSettings, ColorMode } from "@/lib/aura/types";
 
 type Props = {
   settings: AuraSettings;
   onChange: (patch: Partial<AuraSettings>) => void;
+  onReplayCalibration?: () => void;
 };
 
-export function ControlPanel({ settings, onChange }: Props) {
+const PRESETS: { id: ColorMode; label: string }[] = [
+  { id: "rainbow", label: "🌈" },
+  { id: "purple-gold", label: "🔮" },
+  { id: "neon-cyan", label: "💠" },
+  { id: "fire", label: "🔥" },
+  { id: "aurora", label: "🌌" },
+  { id: "custom", label: "🎨" },
+];
+
+export function ControlPanel({ settings, onChange, onReplayCalibration }: Props) {
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -31,7 +41,7 @@ export function ControlPanel({ settings, onChange }: Props) {
             Aura Controls
           </SheetTitle>
           <SheetDescription className="text-muted-foreground">
-            Tune the experience to your liking.
+            Tip: hold ✌️ peace sign to cycle palettes.
           </SheetDescription>
         </SheetHeader>
 
@@ -46,29 +56,29 @@ export function ControlPanel({ settings, onChange }: Props) {
 
           <Separator className="bg-aura-purple/20" />
 
-          <Section title="Particles & Background">
+          <Section title="Particles & Mandalas">
             <SliderRow label="Particle intensity" value={settings.particleIntensity} onChange={(v) => onChange({ particleIntensity: v })} />
             <SliderRow label="Mandala speed" value={settings.mandalaSpeed} onChange={(v) => onChange({ mandalaSpeed: v })} />
-            <SliderRow label="Mandala opacity" value={settings.mandalaOpacity} onChange={(v) => onChange({ mandalaOpacity: v })} />
+            <SliderRow label="Mandala overlay" value={settings.mandalaOpacity} onChange={(v) => onChange({ mandalaOpacity: v })} />
           </Section>
 
           <Separator className="bg-aura-purple/20" />
 
-          <Section title="Color">
+          <Section title="Color preset (✌️ to cycle)">
             <div className="grid grid-cols-3 gap-2">
-              {(["rainbow", "purple-gold", "custom"] as ColorMode[]).map((m) => (
+              {PRESETS.map((p) => (
                 <Button
-                  key={m}
+                  key={p.id}
                   size="sm"
-                  variant={settings.colorMode === m ? "default" : "outline"}
-                  onClick={() => onChange({ colorMode: m })}
+                  variant={settings.colorMode === p.id ? "default" : "outline"}
+                  onClick={() => onChange({ colorMode: p.id })}
                   className={
-                    settings.colorMode === m
+                    settings.colorMode === p.id
                       ? "bg-gradient-to-r from-aura-purple to-aura-gold text-black hover:opacity-90"
                       : "border-aura-purple/40 bg-transparent text-foreground hover:bg-aura-purple/20"
                   }
                 >
-                  {m === "purple-gold" ? "P+G" : m === "rainbow" ? "🌈" : "Hue"}
+                  {p.label}
                 </Button>
               ))}
             </div>
@@ -98,6 +108,19 @@ export function ControlPanel({ settings, onChange }: Props) {
             <Toggle label="Mirror camera" checked={settings.mirrorCamera} onChange={(v) => onChange({ mirrorCamera: v })} />
             <Toggle label="Show hand skeleton" checked={settings.showSkeleton} onChange={(v) => onChange({ showSkeleton: v })} />
           </Section>
+
+          {onReplayCalibration && (
+            <>
+              <Separator className="bg-aura-purple/20" />
+              <Button
+                variant="outline"
+                onClick={onReplayCalibration}
+                className="w-full border-aura-gold/40 bg-transparent text-aura-gold hover:bg-aura-gold/10"
+              >
+                <GraduationCap className="mr-2 h-4 w-4" /> Replay calibration
+              </Button>
+            </>
+          )}
         </div>
       </SheetContent>
     </Sheet>
