@@ -48,8 +48,17 @@ export class EffectsEngine {
 
   hueFor(settings: AuraSettings, base: number): number {
     if (settings.colorMode === "purple-gold") {
-      // Oscillate between purple (~290) and gold (~50)
       return base % 2 < 1 ? 290 + (Math.random() * 30 - 15) : 50 + (Math.random() * 20 - 10);
+    }
+    if (settings.colorMode === "neon-cyan") {
+      return 180 + (Math.random() * 40 - 20);
+    }
+    if (settings.colorMode === "fire") {
+      return Math.random() * 50; // 0..50 red→orange→yellow
+    }
+    if (settings.colorMode === "aurora") {
+      const palette = [140, 170, 200, 280];
+      return palette[Math.floor(Math.random() * palette.length)] + (Math.random() * 20 - 10);
     }
     if (settings.colorMode === "custom") {
       return settings.customHue + (Math.random() * 30 - 15);
@@ -86,37 +95,22 @@ export class EffectsEngine {
   }
 
   drawBackground(ctx: CanvasRenderingContext2D, settings: AuraSettings, dt: number) {
-    // Deep gradient backdrop
-    ctx.fillStyle = "rgba(8, 4, 20, 0.85)";
-    ctx.fillRect(0, 0, this.width, this.height);
+    // Fully clear — keep webcam visible underneath
+    ctx.clearRect(0, 0, this.width, this.height);
 
-    const grad = ctx.createRadialGradient(
-      this.width / 2, this.height / 2, 0,
-      this.width / 2, this.height / 2, Math.max(this.width, this.height) / 1.5
-    );
-    grad.addColorStop(0, "rgba(80, 30, 140, 0.18)");
-    grad.addColorStop(1, "rgba(8, 4, 20, 0)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, this.width, this.height);
-
-    // Matrix rain (subtle)
-    ctx.font = "16px monospace";
-    ctx.fillStyle = `rgba(180, 140, 60, ${0.15 * settings.mandalaOpacity})`;
-    for (const d of this.matrixDrops) {
-      ctx.fillText(d.char, d.x, d.y);
-      d.y += d.speed * dt * 30;
-      if (d.y > this.height) {
-        d.y = -20;
-        d.char = String.fromCharCode(0x30a0 + Math.floor(Math.random() * 96));
-      }
+    // Optional very subtle mandala overlay if user keeps opacity > 0
+    if (settings.mandalaOpacity <= 0.02) {
+      this.mandalaAngle += dt * settings.mandalaSpeed * 0.3;
+      return;
     }
 
-    // Mandalas
     this.mandalaAngle += dt * settings.mandalaSpeed * 0.3;
     const cx = this.width / 2;
     const cy = this.height / 2;
     const op = settings.mandalaOpacity;
 
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
     for (let ring = 0; ring < 4; ring++) {
       const radius = 80 + ring * 70;
       const petals = 8 + ring * 4;
@@ -125,8 +119,8 @@ export class EffectsEngine {
       ctx.translate(cx, cy);
       ctx.rotate(this.mandalaAngle * dir);
       ctx.strokeStyle = ring % 2 === 0
-        ? `rgba(200, 160, 80, ${0.35 * op})`
-        : `rgba(170, 100, 220, ${0.3 * op})`;
+        ? `rgba(255, 200, 100, ${0.35 * op})`
+        : `rgba(200, 130, 255, ${0.3 * op})`;
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       for (let i = 0; i < petals; i++) {
@@ -137,12 +131,12 @@ export class EffectsEngine {
       }
       ctx.closePath();
       ctx.stroke();
-      // Inner circle
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
+    ctx.restore();
   }
 
   drawSkeleton(ctx: CanvasRenderingContext2D, hand: HandData, mirror: boolean) {

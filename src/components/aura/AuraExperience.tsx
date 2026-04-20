@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { toast } from "sonner";
 import { ControlPanel } from "@/components/aura/ControlPanel";
 import { StartScreen } from "@/components/aura/StartScreen";
 import { HUD } from "@/components/aura/HUD";
-import { DEFAULT_SETTINGS, type AuraSettings, type HandData, type Landmark } from "@/lib/aura/types";
+import { Calibration } from "@/components/aura/Calibration";
+import { CaptureControls } from "@/components/aura/CaptureControls";
+import {
+  COLOR_PRESETS,
+  DEFAULT_SETTINGS,
+  type AuraSettings,
+  type ColorMode,
+  type GestureType,
+  type HandData,
+  type Landmark,
+} from "@/lib/aura/types";
 import { EffectsEngine } from "@/lib/aura/effects";
 import { AuraAudio } from "@/lib/aura/audio";
 import { centroid, detectGesture, pinchDistance } from "@/lib/aura/gestures";
@@ -27,6 +38,15 @@ declare global {
 
 const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/";
 
+const PRESET_LABELS: Record<ColorMode, string> = {
+  rainbow: "🌈 Rainbow",
+  "purple-gold": "🔮 Purple + Gold",
+  "neon-cyan": "💠 Neon Cyan",
+  fire: "🔥 Fire",
+  aurora: "🌌 Aurora",
+  custom: "🎨 Custom",
+};
+
 function loadScript(src: string) {
   return new Promise<void>((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) return resolve();
@@ -42,6 +62,7 @@ function loadScript(src: string) {
 export function AuraExperience() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const compositeRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<EffectsEngine | null>(null);
   const audioRef = useRef<AuraAudio | null>(null);
   const handsRef = useRef<MPHands | null>(null);
@@ -57,14 +78,17 @@ export function AuraExperience() {
   const lastLightningRef = useRef(0);
   const prevPinchedRef = useRef<Map<string, boolean>>(new Map());
   const autoIntensityRef = useRef(1);
+  const peaceHoldRef = useRef<{ start: number; fired: boolean }>({ start: 0, fired: false });
+  const lastPresetSwitchRef = useRef(0);
 
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<AuraSettings>(DEFAULT_SETTINGS);
   const [fps, setFps] = useState(0);
-  const [activeGestures, setActiveGestures] = useState<string[]>([]);
+  const [activeGestures, setActiveGestures] = useState<GestureType[]>([]);
   const [handCount, setHandCount] = useState(0);
+  const [showCalibration, setShowCalibration] = useState(false);
 
   const updateSettings = useCallback((patch: Partial<AuraSettings>) => {
     setSettings((s) => {
@@ -76,6 +100,14 @@ export function AuraExperience() {
       return next;
     });
   }, []);
+
+  const cyclePreset = useCallback(() => {
+    const cur = settingsRef.current.colorMode;
+    const idx = COLOR_PRESETS.indexOf(cur as ColorMode);
+    const next = COLOR_PRESETS[(idx + 1) % COLOR_PRESETS.length];
+    updateSettings({ colorMode: next });
+    toast(PRESET_LABELS[next], { description: "Palette switched ✌️", duration: 1500 });
+  }, [updateSettings]);
 
   const handleResize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -92,21 +124,44 @@ export function AuraExperience() {
     }
   }, []);
 
+  // Build composite canvas (camera + effects) for snapshot/recording
+  const getComposite = useCallback((): HTMLCanvasElement | null => {
+    const video = videoRef.current;
+    const fx = canvasRef.current;
+    if (!video || !fx) return null;
+    if (!compositeRef.current) compositeRef.current = document.createElement("canvas");
+    const c = compositeRef.current;
+    const w = video.videoWidth || window.innerWidth;
+    const h = video.videoHeight || window.innerHeight;
+    if (c.width !== w || c.height !== h) {
+      c.width = w;
+      c.height = h;
+    }
+    const ctx = c.getContext("2d");
+    if (!ctx) return null;
+    ctx.save();
+    if (settingsRef.current.mirrorCamera) {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, 0, 0, w, h);
+    ctx.restore();
+    ctx.drawImage(fx, 0, 0, w, h);
+    return c;
+  }, []);
+
   const start = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Init audio (must happen on user gesture)
       const audio = new AuraAudio();
       await audio.init();
       audio.setVolume(settingsRef.current.audioMuted ? 0 : settingsRef.current.audioVolume);
       audioRef.current = audio;
 
-      // Load MediaPipe
       await loadScript(`${MP_BASE}hands.js`);
       if (!window.Hands) throw new Error("MediaPipe failed to load");
 
-      // Camera
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
         audio: false,
@@ -115,7 +170,6 @@ export function AuraExperience() {
       video.srcObject = stream;
       await video.play();
 
-      // Hands
       const hands = new window.Hands({
         locateFile: (file: string) => `${MP_BASE}${file}`,
       });
@@ -130,18 +184,17 @@ export function AuraExperience() {
 
       setStarted(true);
       setLoading(false);
+      setShowCalibration(true);
 
-      // Setup canvas
       handleResize();
       engineRef.current = new EffectsEngine(window.innerWidth, window.innerHeight);
 
-      // Frame loop
       const loop = async () => {
         if (handsRef.current && video.readyState >= 2) {
           try {
             await handsRef.current.send({ image: video });
           } catch {
-            // ignore transient errors
+            // ignore
           }
         }
         renderFrame();
@@ -199,13 +252,11 @@ export function AuraExperience() {
     const dt = Math.min(0.05, (now - lastFrameRef.current) / 1000);
     lastFrameRef.current = now;
 
-    // FPS
     fpsAccumRef.current.frames += 1;
     if (now - fpsAccumRef.current.t > 500) {
       const f = Math.round((fpsAccumRef.current.frames * 1000) / (now - fpsAccumRef.current.t));
       setFps(f);
       fpsAccumRef.current = { frames: 0, t: now };
-      // Auto-reduce intensity if low FPS
       if (f < 25) autoIntensityRef.current = Math.max(0.3, autoIntensityRef.current - 0.1);
       else if (f > 45) autoIntensityRef.current = Math.min(1, autoIntensityRef.current + 0.05);
     }
@@ -219,23 +270,21 @@ export function AuraExperience() {
     let auraActive = false;
     let orbActive = false;
     let orbDepth = 0.5;
+    let anyPeace = false;
 
     for (const hand of hands) {
       const palm = engine.toScreen(hand.landmarks[9], s.mirrorCamera);
       const handHue = (hueBase + (hand.handedness === "Left" ? 120 : 0)) % 360;
 
-      // Trails on fast movement
       if (s.effectTrails && hand.velocity > 0.4) {
         engine.emitTrail(palm.x, palm.y, s, handHue);
       }
 
-      // Aura on open palm
       if (s.effectAura && hand.gesture === "open") {
         engine.emitAura(palm.x, palm.y, s, handHue);
         auraActive = true;
       }
 
-      // Shockwave on pinch (edge-triggered)
       const wasPinching = prevPinchedRef.current.get(hand.handedness) ?? false;
       const isPinching = hand.gesture === "pinch";
       if (s.effectShockwave && isPinching && !wasPinching && now - lastShockwaveRef.current > 200) {
@@ -246,7 +295,6 @@ export function AuraExperience() {
       }
       prevPinchedRef.current.set(hand.handedness, isPinching);
 
-      // Orb on fist
       if (s.effectOrb && hand.gesture === "fist") {
         const orbPos = { x: palm.x, y: palm.y - 70 };
         engine.drawOrb(ctx, orbPos.x, orbPos.y, handHue, now / 1000);
@@ -254,11 +302,28 @@ export function AuraExperience() {
         orbDepth = 1 - Math.min(1, Math.max(0, hand.landmarks[9].z + 0.5));
       }
 
-      // Skeleton overlay
+      if (hand.gesture === "peace") anyPeace = true;
+
       if (s.showSkeleton) engine.drawSkeleton(ctx, hand, s.mirrorCamera);
     }
 
-    // Lightning between two hands
+    // Peace sign → cycle palette (hold ~0.6s, debounce 1.2s)
+    if (anyPeace) {
+      if (peaceHoldRef.current.start === 0) {
+        peaceHoldRef.current = { start: now, fired: false };
+      } else if (
+        !peaceHoldRef.current.fired &&
+        now - peaceHoldRef.current.start > 600 &&
+        now - lastPresetSwitchRef.current > 1200
+      ) {
+        peaceHoldRef.current.fired = true;
+        lastPresetSwitchRef.current = now;
+        cyclePreset();
+      }
+    } else {
+      peaceHoldRef.current = { start: 0, fired: false };
+    }
+
     if (s.effectLightning && hands.length >= 2) {
       const a = engine.toScreen(hands[0].landmarks[9], s.mirrorCamera);
       const b = engine.toScreen(hands[1].landmarks[9], s.mirrorCamera);
@@ -273,7 +338,6 @@ export function AuraExperience() {
       }
     }
 
-    // Audio state machines
     if (auraActive !== auraOpenActiveRef.current) {
       auraOpenActiveRef.current = auraActive;
       if (!s.audioMuted) audioRef.current?.setAuraActive(auraActive, ((hueBase % 360) / 360));
@@ -309,10 +373,10 @@ export function AuraExperience() {
         ref={videoRef}
         playsInline
         muted
-        className="absolute inset-0 h-full w-full object-cover opacity-60"
+        className="absolute inset-0 h-full w-full object-cover"
         style={{ transform: settings.mirrorCamera ? "scaleX(-1)" : undefined }}
       />
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+      <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
 
       {!started && (
         <StartScreen onStart={start} loading={loading} error={error} />
@@ -321,7 +385,19 @@ export function AuraExperience() {
       {started && (
         <>
           <HUD fps={fps} gestures={activeGestures} hands={handCount} />
-          <ControlPanel settings={settings} onChange={updateSettings} />
+          {showCalibration && (
+            <Calibration
+              activeGestures={activeGestures}
+              handCount={handCount}
+              onClose={() => setShowCalibration(false)}
+            />
+          )}
+          <CaptureControls getComposite={getComposite} />
+          <ControlPanel
+            settings={settings}
+            onChange={updateSettings}
+            onReplayCalibration={() => setShowCalibration(true)}
+          />
         </>
       )}
     </div>

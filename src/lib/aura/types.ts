@@ -8,9 +8,11 @@ export type HandData = {
   pinchDistance: number;
 };
 
-export type GestureType = "open" | "fist" | "pinch" | "point" | "unknown";
+export type GestureType = "open" | "fist" | "pinch" | "point" | "peace" | "unknown";
 
-export type ColorMode = "rainbow" | "purple-gold" | "custom";
+export type ColorMode = "rainbow" | "purple-gold" | "custom" | "neon-cyan" | "fire" | "aurora";
+
+export const COLOR_PRESETS: ColorMode[] = ["rainbow", "purple-gold", "neon-cyan", "fire", "aurora"];
 
 export type AuraSettings = {
   effectAura: boolean;
@@ -37,7 +39,7 @@ export const DEFAULT_SETTINGS: AuraSettings = {
   effectLightning: true,
   particleIntensity: 0.7,
   mandalaSpeed: 0.5,
-  mandalaOpacity: 0.55,
+  mandalaOpacity: 0,
   colorMode: "rainbow",
   customHue: 290,
   audioVolume: 0.6,

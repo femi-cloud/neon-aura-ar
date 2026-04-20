@@ -30,6 +30,8 @@ export function detectGesture(lm: Landmark[]): GestureType {
   if (pinch < 0.35 && !middleExt && !ringExt && !pinkyExt) return "pinch";
 
   const extCount = [indexExt, middleExt, ringExt, pinkyExt].filter(Boolean).length;
+  // Peace: index + middle extended, ring + pinky curled
+  if (indexExt && middleExt && !ringExt && !pinkyExt) return "peace";
   if (extCount >= 3) return "open";
   if (extCount === 0) return "fist";
   if (indexExt && !middleExt && !ringExt && !pinkyExt) return "point";
