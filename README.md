@@ -65,7 +65,7 @@ Une expérience AR immersive directement dans le navigateur : ta webcam + MediaP
 ## 🚀 Démarrage
 
 ### Prérequis
-- [Bun](https://bun.sh/) (recommandé) ou Node.js 20+
+- Node.js 20+ (ou [Bun](https://bun.sh/) si tu préfères, c'est plus rapide)
 - Une webcam
 - Un navigateur moderne (Chrome / Edge recommandé pour WebCodecs)
 
@@ -77,11 +77,13 @@ git clone <url-de-ton-repo>
 cd <nom-du-repo>
 
 # Installer les dépendances
-bun install
+npm install
 
 # Lancer en dev
-bun run dev
+npm run dev
 ```
+
+> Tu peux remplacer `npm` par `pnpm`, `yarn` ou `bun` — c'est un projet Vite standard, tous les gestionnaires de paquets fonctionnent.
 
 L'app sera dispo sur `http://localhost:3000` (ou le port indiqué dans la console).
 
@@ -89,11 +91,11 @@ L'app sera dispo sur `http://localhost:3000` (ou le port indiqué dans la consol
 
 | Commande | Description |
 |---|---|
-| `bun run dev` | Serveur de développement avec HMR |
-| `bun run build` | Build de production |
-| `bun run preview` | Prévisualise le build de prod |
-| `bun run lint` | Lint le code avec ESLint |
-| `bun run format` | Formate le code avec Prettier |
+| `npm run dev` | Serveur de développement avec HMR |
+| `npm run build` | Build de production |
+| `npm run preview` | Prévisualise le build de prod |
+| `npm run lint` | Lint le code avec ESLint |
+| `npm run format` | Formate le code avec Prettier |
 
 ---
 
