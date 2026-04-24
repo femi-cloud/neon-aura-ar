@@ -66,49 +66,86 @@ export function CaptureControls({ getComposite }: Props) {
     }, "image/png");
   };
 
-  const toggleRecord = () => {
-    if (recording) {
-      recorderRef.current?.stop();
+  const captureGifFrame = () => {
+    const source = getComposite();
+    if (!source || framesRef.current.length >= GIF_MAX_FRAMES) return;
+
+    const scale = Math.min(1, GIF_MAX_WIDTH / source.width);
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
+    const frameCanvas = frameCanvasRef.current ?? document.createElement("canvas");
+    frameCanvasRef.current = frameCanvas;
+    frameCanvas.width = width;
+    frameCanvas.height = height;
+    const ctx = frameCanvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.drawImage(source, 0, 0, width, height);
+    const image = ctx.getImageData(0, 0, width, height);
+    framesRef.current.push({ data: new Uint8ClampedArray(image.data), width, height });
+  };
+
+  const encodeGif = async () => {
+    const frames = framesRef.current;
+    if (!frames.length) {
+      toast.error("Aucune image enregistrée");
       return;
     }
-    const canvas = getComposite();
-    if (!canvas) return;
-    const stream = canvas.captureStream(30);
-    // Prefer MP4 (H.264) so the file opens natively on Windows/macOS without extra codecs.
-    // Fall back to WebM only when the browser can't record MP4 (e.g. Firefox).
-    const candidates = [
-      "video/mp4;codecs=h264",
-      "video/mp4;codecs=avc1",
-      "video/mp4",
-      "video/webm;codecs=vp9",
-      "video/webm;codecs=vp8",
-      "video/webm",
-    ];
-    const mime = candidates.find((c) => MediaRecorder.isTypeSupported(c)) ?? "";
-    const isMp4 = mime.startsWith("video/mp4");
-    const ext = isMp4 ? "mp4" : "webm";
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5_000_000 } : { videoBitsPerSecond: 5_000_000 });
-    chunksRef.current = [];
-    rec.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-    rec.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: isMp4 ? "video/mp4" : "video/webm" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `aura-${Date.now()}.${ext}`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setRecording(false);
-      setElapsed(0);
-      toast.success(`Recording saved 🎬 (.${ext})`);
-    };
-    rec.start(100);
-    recorderRef.current = rec;
+
+    setProcessing(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+
+    try {
+      const gif = GIFEncoder({ initialCapacity: frames.length * frames[0].width * frames[0].height });
+      frames.forEach((frame, index) => {
+        const palette = quantize(frame.data, 256, { format: "rgb565" });
+        const indexed = applyPalette(frame.data, palette, "rgb565");
+        gif.writeFrame(indexed, frame.width, frame.height, {
+          palette,
+          delay: GIF_FRAME_DELAY,
+          repeat: index === 0 ? 0 : undefined,
+        });
+      });
+      gif.finish();
+      const bytes = gif.bytes();
+      downloadBlob(new Blob([bytes], { type: "image/gif" }), `aura-${Date.now()}.gif`);
+      toast.success("Clip GIF sauvegardé ✅", { description: "Format compatible avec Windows et macOS." });
+    } catch (error) {
+      console.error(error);
+      toast.error("Impossible de générer le GIF");
+    } finally {
+      framesRef.current = [];
+      setProcessing(false);
+    }
+  };
+
+  const stopGifRecording = () => {
+    if (captureTimerRef.current !== null) {
+      window.clearInterval(captureTimerRef.current);
+      captureTimerRef.current = null;
+    }
+    setRecording(false);
+    setElapsed(0);
+    void encodeGif();
+  };
+
+  const startGifRecording = () => {
+    framesRef.current = [];
+    captureGifFrame();
+    captureTimerRef.current = window.setInterval(captureGifFrame, GIF_FRAME_DELAY);
     startRef.current = performance.now();
     setRecording(true);
-    toast("Recording started", { description: "Tap stop when you're done." });
+    toast("Recording started", { description: "Tap stop to save a PC-compatible GIF." });
+  };
+
+  const toggleRecord = () => {
+    if (processing) return;
+    if (recording) {
+      if (recorderRef.current) recorderRef.current.stop();
+      else stopGifRecording();
+      return;
+    }
+
+    startGifRecording();
   };
 
   return (
