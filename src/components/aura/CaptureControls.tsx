@@ -1,16 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Camera, Circle, Square } from "lucide-react";
+import { Camera, Circle, Loader2, Square } from "lucide-react";
 import { toast } from "sonner";
+import { GIFEncoder, applyPalette, quantize } from "gifenc";
 
 type Props = {
   getComposite: () => HTMLCanvasElement | null;
 };
 
+type GifFrame = {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+};
+
+const GIF_FPS = 8;
+const GIF_FRAME_DELAY = 1000 / GIF_FPS;
+const GIF_MAX_WIDTH = 480;
+const GIF_MAX_FRAMES = GIF_FPS * 10;
+
 export function CaptureControls({ getComposite }: Props) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const framesRef = useRef<GifFrame[]>([]);
+  const captureTimerRef = useRef<number | null>(null);
+  const frameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [recording, setRecording] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(0);
 
@@ -22,17 +38,30 @@ export function CaptureControls({ getComposite }: Props) {
     return () => clearInterval(id);
   }, [recording]);
 
+  useEffect(() => {
+    return () => {
+      if (captureTimerRef.current !== null) window.clearInterval(captureTimerRef.current);
+    };
+  }, []);
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const snap = () => {
     const canvas = getComposite();
-    if (!canvas) return;
+    if (!canvas) {
+      toast.error("Capture indisponible");
+      return;
+    }
     canvas.toBlob((blob) => {
       if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `aura-${Date.now()}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `aura-${Date.now()}.png`);
       toast.success("Snapshot saved 📸");
     }, "image/png");
   };
