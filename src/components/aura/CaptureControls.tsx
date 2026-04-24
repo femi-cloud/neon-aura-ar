@@ -73,7 +73,7 @@ export function CaptureControls({ getComposite }: Props) {
       URL.revokeObjectURL(url);
       setRecording(false);
       setElapsed(0);
-      toast.success("Recording saved 🎬");
+      toast.success(`Recording saved 🎬 (.${ext})`);
     };
     rec.start(100);
     recorderRef.current = rec;
