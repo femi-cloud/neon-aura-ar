@@ -4,8 +4,6 @@ Une expérience AR immersive directement dans le navigateur : ta webcam + MediaP
 
 > Pas de fond généré : tu te vois en direct, et les effets viennent se superposer à toi.
 
-![Neon Aura AR](https://id-preview--2b7b6579-a3ec-4d19-b24f-a229f3b6a339.lovable.app)
-
 ---
 
 ## ✨ Fonctionnalités
@@ -142,12 +140,6 @@ Les couleurs et tokens sont définis dans `src/styles.css` au format `oklch`. La
 
 ---
 
-## 🌐 Déploiement
-
-Le projet est configuré pour Cloudflare Workers (voir `wrangler.jsonc`). Tu peux aussi le déployer directement depuis [Lovable](https://lovable.dev) en cliquant sur **Publish**, ou l'exporter et l'héberger où tu veux (Vercel, Netlify, etc.).
-
----
-
 ## 🙏 Crédits
 
 - Construit avec [Lovable](https://lovable.dev)
@@ -155,8 +147,3 @@ Le projet est configuré pour Cloudflare Workers (voir `wrangler.jsonc`). Tu peu
 - UI par [shadcn/ui](https://ui.shadcn.com) et [Radix UI](https://www.radix-ui.com)
 - Encodage MP4 par [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer)
 
----
-
-## 📄 Licence
-
-MIT — fais-en ce que tu veux. ✨
