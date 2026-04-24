@@ -20,8 +20,6 @@ const GIF_MAX_WIDTH = 480;
 const GIF_MAX_FRAMES = GIF_FPS * 10;
 
 export function CaptureControls({ getComposite }: Props) {
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const framesRef = useRef<GifFrame[]>([]);
   const captureTimerRef = useRef<number | null>(null);
   const frameCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -107,7 +105,8 @@ export function CaptureControls({ getComposite }: Props) {
       });
       gif.finish();
       const bytes = gif.bytes();
-      downloadBlob(new Blob([bytes], { type: "image/gif" }), `aura-${Date.now()}.gif`);
+      const output = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      downloadBlob(new Blob([output], { type: "image/gif" }), `aura-${Date.now()}.gif`);
       toast.success("Clip GIF sauvegardé ✅", { description: "Format compatible avec Windows et macOS." });
     } catch (error) {
       console.error(error);
@@ -140,8 +139,7 @@ export function CaptureControls({ getComposite }: Props) {
   const toggleRecord = () => {
     if (processing) return;
     if (recording) {
-      if (recorderRef.current) recorderRef.current.stop();
-      else stopGifRecording();
+      stopGifRecording();
       return;
     }
 
@@ -170,7 +168,13 @@ export function CaptureControls({ getComposite }: Props) {
         }`}
         aria-label={recording ? "Stop recording" : "Start recording"}
       >
-        {recording ? <Square className="h-5 w-5 fill-current" /> : <Circle className="h-5 w-5 fill-current" />}
+        {processing ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : recording ? (
+          <Square className="h-5 w-5 fill-current" />
+        ) : (
+          <Circle className="h-5 w-5 fill-current" />
+        )}
       </Button>
       {recording && (
         <span className="rounded-full bg-red-500/20 px-3 py-1 font-mono text-xs text-red-200 backdrop-blur-md">
