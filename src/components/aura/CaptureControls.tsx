@@ -2,27 +2,215 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Camera, Circle, Loader2, Square } from "lucide-react";
 import { toast } from "sonner";
-import { GIFEncoder, applyPalette, quantize } from "gifenc";
+import { Muxer, ArrayBufferTarget } from "mp4-muxer";
 
 type Props = {
   getComposite: () => HTMLCanvasElement | null;
 };
 
-type GifFrame = {
-  data: Uint8ClampedArray;
-  width: number;
-  height: number;
+const TARGET_FPS = 30;
+const MAX_DURATION_SEC = 30;
+const MAX_WIDTH = 1280;
+
+type WebCodecsRecorder = {
+  stop: () => Promise<Blob>;
+  cancel: () => void;
 };
 
-const GIF_FPS = 8;
-const GIF_FRAME_DELAY = 1000 / GIF_FPS;
-const GIF_MAX_WIDTH = 480;
-const GIF_MAX_FRAMES = GIF_FPS * 10;
+// Build an MP4 (H.264) recorder using WebCodecs + mp4-muxer.
+// Falls back to null if the browser lacks support.
+async function startWebCodecsRecorder(
+  getComposite: () => HTMLCanvasElement | null,
+): Promise<WebCodecsRecorder | null> {
+  // Feature detect.
+  if (typeof window === "undefined") return null;
+  const VEncoder = (window as unknown as { VideoEncoder?: typeof VideoEncoder }).VideoEncoder;
+  const VFrameCtor = (window as unknown as { VideoFrame?: typeof VideoFrame }).VideoFrame;
+  if (!VEncoder || !VFrameCtor) return null;
+
+  const source = getComposite();
+  if (!source) return null;
+
+  // Even dimensions are required for H.264.
+  const scale = Math.min(1, MAX_WIDTH / source.width);
+  const width = Math.max(2, Math.round((source.width * scale) / 2) * 2);
+  const height = Math.max(2, Math.round((source.height * scale) / 2) * 2);
+
+  // Try a few common H.264 codec strings (baseline/main profiles).
+  const codecCandidates = ["avc1.42E01F", "avc1.4D401F", "avc1.640028"];
+  let chosenCodec: string | null = null;
+  for (const codec of codecCandidates) {
+    try {
+      const support = await VEncoder.isConfigSupported({
+        codec,
+        width,
+        height,
+        bitrate: 5_000_000,
+        framerate: TARGET_FPS,
+        avc: { format: "avc" },
+      });
+      if (support.supported) {
+        chosenCodec = codec;
+        break;
+      }
+    } catch {
+      // try next
+    }
+  }
+  if (!chosenCodec) return null;
+
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: {
+      codec: "avc",
+      width,
+      height,
+      frameRate: TARGET_FPS,
+    },
+    fastStart: "in-memory",
+  });
+
+  let encoderError: Error | null = null;
+  const encoder = new VEncoder({
+    output: (chunk, meta) => {
+      muxer.addVideoChunk(chunk, meta);
+    },
+    error: (err) => {
+      encoderError = err instanceof Error ? err : new Error(String(err));
+      console.error("VideoEncoder error", err);
+    },
+  });
+
+  encoder.configure({
+    codec: chosenCodec,
+    width,
+    height,
+    bitrate: 5_000_000,
+    framerate: TARGET_FPS,
+    avc: { format: "avc" },
+  });
+
+  // Offscreen canvas used to scale frames to the target size.
+  const scratch = document.createElement("canvas");
+  scratch.width = width;
+  scratch.height = height;
+  const scratchCtx = scratch.getContext("2d");
+  if (!scratchCtx) {
+    encoder.close();
+    return null;
+  }
+
+  const startTime = performance.now();
+  let frameCount = 0;
+  let stopped = false;
+  let cancelled = false;
+
+  const interval = 1000 / TARGET_FPS;
+  let nextFrameAt = startTime;
+
+  const tick = () => {
+    if (stopped || cancelled) return;
+    const now = performance.now();
+    if (now < nextFrameAt) {
+      rafId = requestAnimationFrame(tick);
+      return;
+    }
+    const elapsedSec = (now - startTime) / 1000;
+    if (elapsedSec >= MAX_DURATION_SEC) {
+      // auto-stop handled by caller via stop()
+      rafId = requestAnimationFrame(tick);
+      return;
+    }
+    const src = getComposite();
+    if (src) {
+      try {
+        scratchCtx.drawImage(src, 0, 0, width, height);
+        const timestamp = Math.round((frameCount * 1_000_000) / TARGET_FPS);
+        const frame = new VFrameCtor(scratch, {
+          timestamp,
+          duration: Math.round(1_000_000 / TARGET_FPS),
+        });
+        const keyFrame = frameCount % (TARGET_FPS * 2) === 0;
+        encoder.encode(frame, { keyFrame });
+        frame.close();
+        frameCount += 1;
+        nextFrameAt += interval;
+      } catch (err) {
+        console.error("frame encode failed", err);
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  };
+
+  let rafId = requestAnimationFrame(tick);
+
+  return {
+    cancel: () => {
+      cancelled = true;
+      stopped = true;
+      cancelAnimationFrame(rafId);
+      try {
+        encoder.close();
+      } catch {
+        // ignore
+      }
+    },
+    stop: async () => {
+      stopped = true;
+      cancelAnimationFrame(rafId);
+      await encoder.flush();
+      encoder.close();
+      if (encoderError) throw encoderError;
+      muxer.finalize();
+      const { buffer } = muxer.target as ArrayBufferTarget;
+      return new Blob([buffer], { type: "video/mp4" });
+    },
+  };
+}
+
+// Fallback recorder using MediaRecorder with the best WebM codec available.
+function startMediaRecorderFallback(
+  getComposite: () => HTMLCanvasElement | null,
+): { stop: () => Promise<{ blob: Blob; ext: string }>; cancel: () => void } | null {
+  const source = getComposite();
+  if (!source) return null;
+  const stream = source.captureStream(TARGET_FPS);
+  const candidates = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+  ];
+  const mime = candidates.find((c) => MediaRecorder.isTypeSupported(c));
+  if (!mime) return null;
+  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+  recorder.start(250);
+  return {
+    cancel: () => {
+      try {
+        recorder.stop();
+      } catch {
+        // ignore
+      }
+    },
+    stop: () =>
+      new Promise((resolve) => {
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: "video/webm" });
+          resolve({ blob, ext: "webm" });
+        };
+        recorder.stop();
+      }),
+  };
+}
 
 export function CaptureControls({ getComposite }: Props) {
-  const framesRef = useRef<GifFrame[]>([]);
-  const captureTimerRef = useRef<number | null>(null);
-  const frameCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const webCodecsRef = useRef<WebCodecsRecorder | null>(null);
+  const fallbackRef = useRef<ReturnType<typeof startMediaRecorderFallback> | null>(null);
   const [recording, setRecording] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -32,15 +220,14 @@ export function CaptureControls({ getComposite }: Props) {
     if (!recording) return;
     const id = setInterval(() => {
       setElapsed(Math.floor((performance.now() - startRef.current) / 1000));
+      if ((performance.now() - startRef.current) / 1000 >= MAX_DURATION_SEC) {
+        // auto-stop at max duration
+        void stopRecording();
+      }
     }, 250);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording]);
-
-  useEffect(() => {
-    return () => {
-      if (captureTimerRef.current !== null) window.clearInterval(captureTimerRef.current);
-    };
-  }, []);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -64,86 +251,67 @@ export function CaptureControls({ getComposite }: Props) {
     }, "image/png");
   };
 
-  const captureGifFrame = () => {
-    const source = getComposite();
-    if (!source || framesRef.current.length >= GIF_MAX_FRAMES) return;
-
-    const scale = Math.min(1, GIF_MAX_WIDTH / source.width);
-    const width = Math.max(1, Math.round(source.width * scale));
-    const height = Math.max(1, Math.round(source.height * scale));
-    const frameCanvas = frameCanvasRef.current ?? document.createElement("canvas");
-    frameCanvasRef.current = frameCanvas;
-    frameCanvas.width = width;
-    frameCanvas.height = height;
-    const ctx = frameCanvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return;
-    ctx.drawImage(source, 0, 0, width, height);
-    const image = ctx.getImageData(0, 0, width, height);
-    framesRef.current.push({ data: new Uint8ClampedArray(image.data), width, height });
-  };
-
-  const encodeGif = async () => {
-    const frames = framesRef.current;
-    if (!frames.length) {
-      toast.error("Aucune image enregistrée");
-      return;
-    }
-
+  const startRecording = async () => {
     setProcessing(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 50));
-
     try {
-      const gif = GIFEncoder({ initialCapacity: frames.length * frames[0].width * frames[0].height });
-      frames.forEach((frame, index) => {
-        const palette = quantize(frame.data, 256, { format: "rgb565" });
-        const indexed = applyPalette(frame.data, palette, "rgb565");
-        gif.writeFrame(indexed, frame.width, frame.height, {
-          palette,
-          delay: GIF_FRAME_DELAY,
-          repeat: index === 0 ? 0 : undefined,
+      const wc = await startWebCodecsRecorder(getComposite);
+      if (wc) {
+        webCodecsRef.current = wc;
+        startRef.current = performance.now();
+        setRecording(true);
+        toast("Recording started", { description: "MP4 H.264 — lisible partout." });
+        return;
+      }
+      const fb = startMediaRecorderFallback(getComposite);
+      if (fb) {
+        fallbackRef.current = fb;
+        startRef.current = performance.now();
+        setRecording(true);
+        toast("Recording started", {
+          description: "Format WebM (votre navigateur ne supporte pas l'export MP4).",
         });
-      });
-      gif.finish();
-      const bytes = gif.bytes();
-      const output = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-      downloadBlob(new Blob([output], { type: "image/gif" }), `aura-${Date.now()}.gif`);
-      toast.success("Clip GIF sauvegardé ✅", { description: "Format compatible avec Windows et macOS." });
-    } catch (error) {
-      console.error(error);
-      toast.error("Impossible de générer le GIF");
+        return;
+      }
+      toast.error("Enregistrement non supporté par ce navigateur");
     } finally {
-      framesRef.current = [];
       setProcessing(false);
     }
   };
 
-  const stopGifRecording = () => {
-    if (captureTimerRef.current !== null) {
-      window.clearInterval(captureTimerRef.current);
-      captureTimerRef.current = null;
-    }
+  const stopRecording = async () => {
+    if (!recording) return;
     setRecording(false);
     setElapsed(0);
-    void encodeGif();
-  };
-
-  const startGifRecording = () => {
-    framesRef.current = [];
-    captureGifFrame();
-    captureTimerRef.current = window.setInterval(captureGifFrame, GIF_FRAME_DELAY);
-    startRef.current = performance.now();
-    setRecording(true);
-    toast("Recording started", { description: "Tap stop to save a PC-compatible GIF." });
+    setProcessing(true);
+    try {
+      if (webCodecsRef.current) {
+        const blob = await webCodecsRef.current.stop();
+        webCodecsRef.current = null;
+        downloadBlob(blob, `aura-${Date.now()}.mp4`);
+        toast.success("Clip MP4 sauvegardé ✅", {
+          description: "Lisible sur Windows, macOS, iOS et Android.",
+        });
+      } else if (fallbackRef.current) {
+        const { blob, ext } = await fallbackRef.current.stop();
+        fallbackRef.current = null;
+        downloadBlob(blob, `aura-${Date.now()}.${ext}`);
+        toast.success(`Clip .${ext} sauvegardé ✅`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Impossible de finaliser la vidéo");
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const toggleRecord = () => {
     if (processing) return;
     if (recording) {
-      stopGifRecording();
-      return;
+      void stopRecording();
+    } else {
+      void startRecording();
     }
-
-    startGifRecording();
   };
 
   return (
