@@ -45,25 +45,35 @@ export function CaptureControls({ getComposite }: Props) {
     const canvas = getComposite();
     if (!canvas) return;
     const stream = canvas.captureStream(30);
-    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-      ? "video/webm;codecs=vp9"
-      : "video/webm";
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
+    // Prefer MP4 (H.264) so the file opens natively on Windows/macOS without extra codecs.
+    // Fall back to WebM only when the browser can't record MP4 (e.g. Firefox).
+    const candidates = [
+      "video/mp4;codecs=h264",
+      "video/mp4;codecs=avc1",
+      "video/mp4",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ];
+    const mime = candidates.find((c) => MediaRecorder.isTypeSupported(c)) ?? "";
+    const isMp4 = mime.startsWith("video/mp4");
+    const ext = isMp4 ? "mp4" : "webm";
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5_000_000 } : { videoBitsPerSecond: 5_000_000 });
     chunksRef.current = [];
     rec.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
     rec.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: "video/webm" });
+      const blob = new Blob(chunksRef.current, { type: isMp4 ? "video/mp4" : "video/webm" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `aura-${Date.now()}.webm`;
+      a.download = `aura-${Date.now()}.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
       setRecording(false);
       setElapsed(0);
-      toast.success("Recording saved 🎬");
+      toast.success(`Recording saved 🎬 (.${ext})`);
     };
     rec.start(100);
     recorderRef.current = rec;
