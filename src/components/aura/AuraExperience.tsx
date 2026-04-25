@@ -80,6 +80,8 @@ export function AuraExperience() {
   const autoIntensityRef = useRef(1);
   const peaceHoldRef = useRef<{ start: number; fired: boolean }>({ start: 0, fired: false });
   const lastPresetSwitchRef = useRef(0);
+  const lastCloneSfxRef = useRef(0);
+  const cloneActiveRef = useRef(false);
 
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -324,7 +326,52 @@ export function AuraExperience() {
       peaceHoldRef.current = { start: 0, fired: false };
     }
 
-    if (s.effectLightning && hands.length >= 2) {
+    // Cross-peace multi-clone: both hands in peace + index/middle tips crossing
+    let cloneActive = false;
+    if (hands.length >= 2 && hands[0].gesture === "peace" && hands[1].gesture === "peace") {
+      const h0 = hands[0];
+      const h1 = hands[1];
+      const i0 = engine.toScreen(h0.landmarks[8], s.mirrorCamera);
+      const m0 = engine.toScreen(h0.landmarks[12], s.mirrorCamera);
+      const i1 = engine.toScreen(h1.landmarks[8], s.mirrorCamera);
+      const m1 = engine.toScreen(h1.landmarks[12], s.mirrorCamera);
+      // Average finger tips of each hand → distance threshold relative to palm size
+      const tip0 = { x: (i0.x + m0.x) / 2, y: (i0.y + m0.y) / 2 };
+      const tip1 = { x: (i1.x + m1.x) / 2, y: (i1.y + m1.y) / 2 };
+      const palm0 = engine.toScreen(h0.landmarks[0], s.mirrorCamera);
+      const palmRef = engine.toScreen(h0.landmarks[9], s.mirrorCamera);
+      const palmSize = Math.hypot(palm0.x - palmRef.x, palm0.y - palmRef.y);
+      const tipDist = Math.hypot(tip0.x - tip1.x, tip0.y - tip1.y);
+      if (palmSize > 0 && tipDist < palmSize * 1.6) {
+        cloneActive = true;
+        const pivot = { x: (tip0.x + tip1.x) / 2, y: (tip0.y + tip1.y) / 2 };
+        const cloneCount = 6;
+        const baseHue = (hueBase + 200) % 360;
+        engine.drawCloneHalo(ctx, pivot.x, pivot.y, baseHue, now / 1000);
+        for (let k = 1; k <= cloneCount; k++) {
+          const angle = (k / cloneCount) * Math.PI * 2 + now / 1500;
+          const scale = 0.55 + 0.35 * Math.sin(now / 600 + k);
+          const alpha = 0.55 - (k / cloneCount) * 0.35;
+          const hue = (baseHue + k * 40) % 360;
+          engine.drawCloneSkeleton(ctx, h0, s.mirrorCamera, pivot, angle, scale, alpha, hue);
+          engine.drawCloneSkeleton(ctx, h1, s.mirrorCamera, pivot, -angle, scale, alpha, (hue + 60) % 360);
+        }
+        // Burst particles around pivot
+        for (let p = 0; p < 3; p++) {
+          engine.emitAura(pivot.x, pivot.y, s, baseHue);
+        }
+        if (!s.audioMuted && now - lastCloneSfxRef.current > 350) {
+          audioRef.current?.playClone(0.7);
+          lastCloneSfxRef.current = now;
+        }
+      }
+    }
+    if (cloneActive && !cloneActiveRef.current) {
+      toast("✨ Multi-Clone activé", { description: "Croisement de mains détecté", duration: 1200 });
+    }
+    cloneActiveRef.current = cloneActive;
+
+    if (s.effectLightning && hands.length >= 2 && !cloneActive) {
       const a = engine.toScreen(hands[0].landmarks[9], s.mirrorCamera);
       const b = engine.toScreen(hands[1].landmarks[9], s.mirrorCamera);
       const d = Math.hypot(a.x - b.x, a.y - b.y);
