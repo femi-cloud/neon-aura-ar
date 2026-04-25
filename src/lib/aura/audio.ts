@@ -42,6 +42,26 @@ export class AuraAudio {
     osc.stop(t + 0.65);
   }
 
+  // Shimmer chime for clone burst
+  playClone(intensity = 1) {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    const freqs = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
+    freqs.forEach((f, i) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(f, t + i * 0.04);
+      gain.gain.setValueAtTime(0.0001, t + i * 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.18 * intensity, t + i * 0.04 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.04 + 0.6);
+      osc.connect(gain);
+      gain.connect(this.master!);
+      osc.start(t + i * 0.04);
+      osc.stop(t + i * 0.04 + 0.65);
+    });
+  }
+
   // Lightning crackle
   playLightning(intensity = 1) {
     if (!this.ctx || !this.master) return;

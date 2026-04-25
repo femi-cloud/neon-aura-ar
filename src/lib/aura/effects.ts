@@ -161,6 +161,60 @@ export class EffectsEngine {
     ctx.restore();
   }
 
+  // Draw a single ghost clone of a hand skeleton, transformed around a pivot.
+  drawCloneSkeleton(
+    ctx: CanvasRenderingContext2D,
+    hand: HandData,
+    mirror: boolean,
+    pivot: { x: number; y: number },
+    rotation: number,
+    scale: number,
+    alpha: number,
+    hue: number,
+  ) {
+    const pts = hand.landmarks.map((l) => this.toScreen(l, mirror));
+    ctx.save();
+    ctx.translate(pivot.x, pivot.y);
+    ctx.rotate(rotation);
+    ctx.scale(scale, scale);
+    ctx.translate(-pivot.x, -pivot.y);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowColor = `hsla(${hue}, 100%, 70%, ${alpha})`;
+    ctx.shadowBlur = 18;
+    ctx.strokeStyle = `hsla(${hue}, 100%, 75%, ${alpha})`;
+    ctx.lineWidth = 2;
+    for (const [a, b] of HAND_CONNECTIONS) {
+      ctx.beginPath();
+      ctx.moveTo(pts[a].x, pts[a].y);
+      ctx.lineTo(pts[b].x, pts[b].y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = `hsla(${hue}, 100%, 85%, ${alpha})`;
+    for (const p of pts) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Pulsing halo at the cross-peace pivot
+  drawCloneHalo(ctx: CanvasRenderingContext2D, x: number, y: number, hue: number, t: number) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const pulse = 1 + Math.sin(t * 6) * 0.2;
+    const r = 60 * pulse;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, `hsla(${hue}, 100%, 80%, 0.55)`);
+    grad.addColorStop(0.6, `hsla(${(hue + 40) % 360}, 100%, 60%, 0.25)`);
+    grad.addColorStop(1, `hsla(${hue}, 100%, 50%, 0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   toScreen(l: Landmark, mirror: boolean) {
     const x = (mirror ? 1 - l.x : l.x) * this.width;
     const y = l.y * this.height;
