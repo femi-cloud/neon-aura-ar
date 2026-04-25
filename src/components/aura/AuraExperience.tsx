@@ -16,7 +16,7 @@ import {
 } from "@/lib/aura/types";
 import { EffectsEngine } from "@/lib/aura/effects";
 import { AuraAudio } from "@/lib/aura/audio";
-import { centroid, detectGesture, pinchDistance } from "@/lib/aura/gestures";
+import { centroid, detectGesture, pinchDistance, isFingersJoined, segmentsIntersect, lineIntersection } from "@/lib/aura/gestures";
 
 // Loaded dynamically from CDN
 type MPHandsResults = {
@@ -326,48 +326,63 @@ export function AuraExperience() {
       peaceHoldRef.current = { start: 0, fired: false };
     }
 
-    // Cross-peace multi-clone: both hands in peace + index/middle tips crossing
+    // Naruto-style cross-seal multi-clone:
+    //  - both hands in "peace" (index + middle extended, others curled)
+    //  - on each hand, index & middle are GLUED together
+    //  - the two finger-pairs (treated as line segments from MCP→tip) actually CROSS in 2D
     let cloneActive = false;
     if (hands.length >= 2 && hands[0].gesture === "peace" && hands[1].gesture === "peace") {
       const h0 = hands[0];
       const h1 = hands[1];
-      const i0 = engine.toScreen(h0.landmarks[8], s.mirrorCamera);
-      const m0 = engine.toScreen(h0.landmarks[12], s.mirrorCamera);
-      const i1 = engine.toScreen(h1.landmarks[8], s.mirrorCamera);
-      const m1 = engine.toScreen(h1.landmarks[12], s.mirrorCamera);
-      // Average finger tips of each hand → distance threshold relative to palm size
-      const tip0 = { x: (i0.x + m0.x) / 2, y: (i0.y + m0.y) / 2 };
-      const tip1 = { x: (i1.x + m1.x) / 2, y: (i1.y + m1.y) / 2 };
-      const palm0 = engine.toScreen(h0.landmarks[0], s.mirrorCamera);
-      const palmRef = engine.toScreen(h0.landmarks[9], s.mirrorCamera);
-      const palmSize = Math.hypot(palm0.x - palmRef.x, palm0.y - palmRef.y);
-      const tipDist = Math.hypot(tip0.x - tip1.x, tip0.y - tip1.y);
-      if (palmSize > 0 && tipDist < palmSize * 1.6) {
-        cloneActive = true;
-        const pivot = { x: (tip0.x + tip1.x) / 2, y: (tip0.y + tip1.y) / 2 };
-        const cloneCount = 6;
-        const baseHue = (hueBase + 200) % 360;
-        engine.drawCloneHalo(ctx, pivot.x, pivot.y, baseHue, now / 1000);
-        for (let k = 1; k <= cloneCount; k++) {
-          const angle = (k / cloneCount) * Math.PI * 2 + now / 1500;
-          const scale = 0.55 + 0.35 * Math.sin(now / 600 + k);
-          const alpha = 0.55 - (k / cloneCount) * 0.35;
-          const hue = (baseHue + k * 40) % 360;
-          engine.drawCloneSkeleton(ctx, h0, s.mirrorCamera, pivot, angle, scale, alpha, hue);
-          engine.drawCloneSkeleton(ctx, h1, s.mirrorCamera, pivot, -angle, scale, alpha, (hue + 60) % 360);
-        }
-        // Burst particles around pivot
-        for (let p = 0; p < 3; p++) {
-          engine.emitAura(pivot.x, pivot.y, s, baseHue);
-        }
-        if (!s.audioMuted && now - lastCloneSfxRef.current > 350) {
-          audioRef.current?.playClone(0.7);
-          lastCloneSfxRef.current = now;
+      const joined0 = isFingersJoined(h0.landmarks);
+      const joined1 = isFingersJoined(h1.landmarks);
+      if (joined0 && joined1) {
+        // Build one representative segment per hand: middle of (index_mcp, middle_mcp) → middle of (index_tip, middle_tip)
+        const baseScreen = (a: Landmark, b: Landmark) => {
+          const sa = engine.toScreen(a, s.mirrorCamera);
+          const sb = engine.toScreen(b, s.mirrorCamera);
+          return { x: (sa.x + sb.x) / 2, y: (sa.y + sb.y) / 2 };
+        };
+        const base0 = baseScreen(h0.landmarks[5], h0.landmarks[9]);
+        const tip0 = baseScreen(h0.landmarks[8], h0.landmarks[12]);
+        const base1 = baseScreen(h1.landmarks[5], h1.landmarks[9]);
+        const tip1 = baseScreen(h1.landmarks[8], h1.landmarks[12]);
+
+        // Extend segments slightly past tips to be lenient with timing
+        const extend = (a: { x: number; y: number }, b: { x: number; y: number }, k = 1.25) => ({
+          x: a.x + (b.x - a.x) * k,
+          y: a.y + (b.y - a.y) * k,
+        });
+        const tip0Ext = extend(base0, tip0);
+        const tip1Ext = extend(base1, tip1);
+
+        const crosses = segmentsIntersect(base0, tip0Ext, base1, tip1Ext);
+        if (crosses) {
+          cloneActive = true;
+          const pivot = lineIntersection(base0, tip0Ext, base1, tip1Ext);
+          const cloneCount = 6;
+          const baseHue = (hueBase + 200) % 360;
+          engine.drawCloneHalo(ctx, pivot.x, pivot.y, baseHue, now / 1000);
+          for (let k = 1; k <= cloneCount; k++) {
+            const angle = (k / cloneCount) * Math.PI * 2 + now / 1500;
+            const scale = 0.55 + 0.35 * Math.sin(now / 600 + k);
+            const alpha = 0.55 - (k / cloneCount) * 0.35;
+            const hue = (baseHue + k * 40) % 360;
+            engine.drawCloneSkeleton(ctx, h0, s.mirrorCamera, pivot, angle, scale, alpha, hue);
+            engine.drawCloneSkeleton(ctx, h1, s.mirrorCamera, pivot, -angle, scale, alpha, (hue + 60) % 360);
+          }
+          for (let p = 0; p < 3; p++) {
+            engine.emitAura(pivot.x, pivot.y, s, baseHue);
+          }
+          if (!s.audioMuted && now - lastCloneSfxRef.current > 350) {
+            audioRef.current?.playClone(0.7);
+            lastCloneSfxRef.current = now;
+          }
         }
       }
     }
     if (cloneActive && !cloneActiveRef.current) {
-      toast("✨ Multi-Clone activé", { description: "Croisement de mains détecté", duration: 1200 });
+      toast("✨ Multi-Clone activé", { description: "Sceau Naruto détecté 🥷", duration: 1400 });
     }
     cloneActiveRef.current = cloneActive;
 
