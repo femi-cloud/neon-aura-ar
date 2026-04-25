@@ -362,36 +362,17 @@ export function AuraExperience() {
           const pivot = lineIntersection(base0, tip0Ext, base1, tip1Ext);
           const baseHue = (hueBase + 200) % 360;
 
-          // Person clones: copies of the live webcam frame placed in a ring around the pivot.
-          // Drawn BEFORE the halo/skeletons so they sit behind the glow.
+          // Person clones: simple translucent copies of the live webcam,
+          // shifted to the left and right of the user. No rotation, no tint.
           const video = videoRef.current;
           if (video) {
-            const cloneCount = 6;
-            const ringRadius = 180; // px offset from pivot
-            for (let k = 0; k < cloneCount; k++) {
-              const a = (k / cloneCount) * Math.PI * 2 + now / 2200;
-              // Offset pivot so each clone appears displaced around the user
-              const offX = Math.cos(a) * ringRadius;
-              const offY = Math.sin(a) * ringRadius * 0.55; // flatter ellipse
-              const clonePivot = { x: pivot.x + offX, y: pivot.y + offY };
-              const scale = 0.78 + 0.05 * Math.sin(now / 500 + k);
-              const rotation = Math.sin(now / 900 + k) * 0.08;
-              const alpha = 0.42;
-              const hue = (baseHue + k * 50) % 360;
-              engine.drawPersonClone(ctx, video, s.mirrorCamera, clonePivot, rotation, scale, alpha, hue);
-            }
+            const offset = engine.width * 0.55;
+            engine.drawPersonClone(ctx, video, s.mirrorCamera, -offset, 0.55);
+            engine.drawPersonClone(ctx, video, s.mirrorCamera, offset, 0.55);
           }
 
-          // Halo + skeleton flourishes on top
+          // Subtle halo at the seal point (kept for feedback)
           engine.drawCloneHalo(ctx, pivot.x, pivot.y, baseHue, now / 1000);
-          for (let k = 1; k <= 4; k++) {
-            const angle = (k / 4) * Math.PI * 2 + now / 1500;
-            const scale = 0.55 + 0.35 * Math.sin(now / 600 + k);
-            const alpha = 0.4 - (k / 4) * 0.2;
-            const hue = (baseHue + k * 40) % 360;
-            engine.drawCloneSkeleton(ctx, h0, s.mirrorCamera, pivot, angle, scale, alpha, hue);
-            engine.drawCloneSkeleton(ctx, h1, s.mirrorCamera, pivot, -angle, scale, alpha, (hue + 60) % 360);
-          }
           for (let p = 0; p < 3; p++) {
             engine.emitAura(pivot.x, pivot.y, s, baseHue);
           }
