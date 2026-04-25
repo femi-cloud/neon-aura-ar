@@ -215,6 +215,45 @@ export class EffectsEngine {
     ctx.restore();
   }
 
+  // Draw a ghostly clone of the person (live webcam frame) around a pivot.
+  // The video is rotated/scaled around the pivot and tinted for a "Kage Bunshin" look.
+  drawPersonClone(
+    ctx: CanvasRenderingContext2D,
+    video: HTMLVideoElement,
+    mirror: boolean,
+    pivot: { x: number; y: number },
+    rotation: number,
+    scale: number,
+    alpha: number,
+    hue: number,
+  ) {
+    if (!video.videoWidth || !video.videoHeight) return;
+    const w = this.width;
+    const h = this.height;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // Transform around pivot
+    ctx.translate(pivot.x, pivot.y);
+    ctx.rotate(rotation);
+    ctx.scale(mirror ? -scale : scale, scale);
+    ctx.translate(-pivot.x, -pivot.y);
+    // Draw the live webcam frame stretched to canvas size (matches the bg <video>)
+    ctx.drawImage(video, 0, 0, w, h);
+    ctx.restore();
+
+    // Color tint overlay clipped to the same transform
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.45;
+    ctx.globalCompositeOperation = "overlay";
+    ctx.translate(pivot.x, pivot.y);
+    ctx.rotate(rotation);
+    ctx.scale(mirror ? -scale : scale, scale);
+    ctx.translate(-pivot.x, -pivot.y);
+    ctx.fillStyle = `hsl(${hue}, 100%, 60%)`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
   toScreen(l: Landmark, mirror: boolean) {
     const x = (mirror ? 1 - l.x : l.x) * this.width;
     const y = l.y * this.height;
